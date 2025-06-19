@@ -6,45 +6,57 @@
 #include "hardware/gpio.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
+#include <stdlib.h> // Necessário para malloc e free
+// #include "lib/matrizLed.h" // Removido
+// #include "lib/buzzer.h"    // Removido
 #include "lib/ssd1306.h"
-#include "lib/matrizLed.h"
-#include "lib/buzzer.h"
 #include "font.h"
 #include "pico/bootrom.h"
 
 #define BOTAO_A 5
 #define BOTAO_B 6
-#define LED_BLUE_PIN 12
-#define JOYSTICK_X 26
-#define JOYSTICK_Y 27
-#define WS2812_PIN 7
-#define NUM_PIXELS 25
-#define BUZZER_PIN 21
+#define BOTAO_SW 22 // Botão SW do Joystick
+// #define LED_BLUE_PIN 12   // Removido
+#define BOIA_ADC_PIN 28 // GPIO28 é o ADC2
+#define BOMBA1_PIN 16
+#define BOMBA2_PIN 17
 
-#define WIFI_SSID "SSID"
-#define WIFI_PASS "PASSWORD"
+// #define JOYSTICK_X 26     // Removido
+// #define JOYSTICK_Y 27     // Removido
+// #define WS2812_PIN 7      // Removido
+// #define NUM_PIXELS 25     // Removido
+// #define BUZZER_PIN 21     // Removido
 
-#define STEP 0.1
-#define LIMIT_MAX_RESET 25.0
+#define WIFI_SSID ""
+#define WIFI_PASS ""
 
-uint16_t limite_percentual = LIMIT_MAX_RESET;
-float nivel_percentual = 20;
+// #define STEP 0.1 // Removido
+// #define LIMIT_MAX_RESET 25.0 // Removido
+
+// uint16_t limite_percentual = LIMIT_MAX_RESET; // Será atualizado pela faixa
+// float nivel_percentual = 20; // Será atualizado pela boia
+
+// Estrutura para pontos de calibração da boia (ADC, Percentual)
+// Estrutura para faixas de operação
+typedef struct
+{
+    int percent_min;
+    int percent_max;
+    const char *nome_faixa; // Para exibição
+} FaixaOperacao;
+
+static const FaixaOperacao faixas_disponiveis[] = {
+    {0, 10, "0-10%"}, {10, 20, "10-20%"}, {20, 30, "20-30%"}, {30, 40, "30-40%"}, {40, 50, "40-50%"}, {50, 60, "50-60%"}, {60, 70, "60-70%"}, {70, 80, "70-80%"}};
+static const int num_faixas_disponiveis = sizeof(faixas_disponiveis) / sizeof(faixas_disponiveis[0]);
+
+int g_indice_faixa_selecionada = 3; // Padrão: Faixa 30-40% (índice 3)
+float g_nivel_boia_pc = 0.0f;       // Nível atual da boia em percentual
+bool g_bombas_ligadas = false;      // Estado atual das bombas (true = ligadas, false = desligadas)
+
+float nivel_percentual_compat = 0.0f;
+uint16_t limite_percentual_compat = 0;
+
 volatile uint32_t last_time = 0;
-
-bool leds_Normal[NUM_PIXELS] = {
-    0, 1, 1, 1, 0,
-    1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1,
-    0, 1, 1, 1, 0};
-
-bool leds_Alerta[NUM_PIXELS] = {
-    0, 0, 0, 0, 0,
-    1, 1, 1, 1, 1,
-    0, 1, 1, 1, 0,
-    0, 0, 1, 0, 0,
-    0, 0, 0, 0, 0};
 
 #define XSTR(x) STR(x)
 #define STR(x) #x
@@ -157,13 +169,13 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
 
     if (strstr(req, "GET /estado"))
     {
-        adc_select_input(0);
-        uint16_t x = adc_read();
+        // Para compatibilidade com o HTML, usamos nivel_percentual_compat e limite_percentual_compat
+        // que são atualizados no loop principal com base na boia e na faixa selecionada.
 
         char json_payload[128];
         int json_len = snprintf(json_payload, sizeof(json_payload),
                                 "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
-                                nivel_percentual, 0, 100, limite_percentual);
+                                nivel_percentual_compat, 0, 100, limite_percentual_compat);
 
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
@@ -174,23 +186,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "%s",
                            json_len, json_payload);
     }
-    else if (strstr(req, "GET /config"))
-    {
-        int novo_limite = get_param_val(req, "limite");
-
-        if (novo_limite >= 0 && novo_limite <= 100)
-        {
-            limite_percentual = novo_limite;
-        }
-
-        hs->len = snprintf(hs->response, sizeof(hs->response),
-                           "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/plain\r\n"
-                           "Content-Length: 2\r\n"
-                           "Connection: close\r\n"
-                           "\r\n"
-                           "OK");
-    }
+    // O endpoint GET /config foi removido, pois a seleção de faixa substitui essa funcionalidade.
     else
     {
         hs->len = snprintf(hs->response, sizeof(hs->response),
@@ -235,45 +231,76 @@ static void start_http_server(void)
     printf("Servidor HTTP rodando na porta 80...\n");
 }
 
-void atualizar_leds()
+// Função para converter leitura ADC da boia para percentual
+int adc_para_percentual_boia(uint16_t adc_valor)
 {
-    if (nivel_percentual >= limite_percentual)
-    {
-        set_one_led(10, 0, 0, leds_Alerta);
-        gpio_put(LED_BLUE_PIN, 0); // Desliga o LED azul
-    }
-    else
-    {
-        set_one_led(0, 10, 0, leds_Normal);
-        gpio_put(LED_BLUE_PIN, 1); // liga o LED azul
+    const uint16_t adc_min = 200;  // Valor ADC para 0%
+    const uint16_t adc_max = 2800; // Valor ADC para 80%
+    const int percent_min = 0;
+    const int percent_max = 80;
 
+    if (adc_valor <= adc_min)
+    {
+        return percent_min;
     }
+    if (adc_valor >= adc_max)
+    {
+        return percent_max;
+    }
+
+    // Interpolação linear
+    // percentual = ((adc_lido - adc_min) / (adc_max - adc_min)) * (percent_max - percent_min) + percent_min
+    // Como percent_min é 0, simplifica para:
+    // percentual = ((adc_lido - adc_min) / (adc_max - adc_min)) * percent_max
+    return (int)(((float)(adc_valor - adc_min) / (adc_max - adc_min)) * percent_max);
 }
 
-void atualizar_buzzer()
+// Função para controlar as bombas (define o estado dos GPIOs)
+void controlar_bombas(bool ligar)
 {
-    if (nivel_percentual >= limite_percentual)
-    {
-        buzzer_play(BUZZER_PIN, 1000, 300);
-        buzzer_play(BUZZER_PIN, 1500, 300);
-        sleep_ms(200);
-    }
+    gpio_put(BOMBA1_PIN, ligar ? 0 : 1); // Lógica invertida: 0 = LIGADO, 1 = DESLIGADO
+    gpio_put(BOMBA2_PIN, ligar ? 0 : 1);
+    g_bombas_ligadas = ligar;
+}
+
+// Inicializa os pinos das bombas
+void init_bombas_gpio()
+{
+    gpio_init(BOMBA1_PIN);
+    gpio_set_dir(BOMBA1_PIN, GPIO_OUT);
+    gpio_put(BOMBA1_PIN, 1); // Começa desligada
+
+    gpio_init(BOMBA2_PIN);
+    gpio_set_dir(BOMBA2_PIN, GPIO_OUT);
+    gpio_put(BOMBA2_PIN, 1); // Começa desligada
+    g_bombas_ligadas = false;
 }
 
 void gpio_irq_handler(uint gpio, uint32_t event)
 {
-
     uint32_t current_time = to_us_since_boot(get_absolute_time());
 
-    if (current_time - last_time > 200000)
+    if (current_time - last_time > 200000) // Debounce de 200ms
     {
-        if (gpio == BOTAO_B)
+        if (gpio == BOTAO_A)
         {
+            g_indice_faixa_selecionada = (g_indice_faixa_selecionada + 1) % num_faixas_disponiveis;
+            printf("Faixa de operacao alterada para: %s\n", faixas_disponiveis[g_indice_faixa_selecionada].nome_faixa);
+            limite_percentual_compat = faixas_disponiveis[g_indice_faixa_selecionada].percent_min;
+        }
+        else if (gpio == BOTAO_B)
+        {
+            printf("Botao B pressionado: Entrando no modo bootloader USB...\n");
             reset_usb_boot(0, 0);
         }
-        else
+        else if (gpio == BOTAO_SW)
         {
-            limite_percentual = LIMIT_MAX_RESET;
+            g_indice_faixa_selecionada--;
+            if (g_indice_faixa_selecionada < 0) {
+                g_indice_faixa_selecionada = num_faixas_disponiveis - 1;
+            }
+            printf("Faixa de operacao (SW) alterada para: %s\n", faixas_disponiveis[g_indice_faixa_selecionada].nome_faixa);
+            limite_percentual_compat = faixas_disponiveis[g_indice_faixa_selecionada].percent_min;
         }
         last_time = current_time;
     }
@@ -281,6 +308,10 @@ void gpio_irq_handler(uint gpio, uint32_t event)
 
 int main()
 {
+    // Inicializa as variáveis de compatibilidade com o HTML
+    nivel_percentual_compat = 0; // Valor inicial
+    limite_percentual_compat = faixas_disponiveis[g_indice_faixa_selecionada].percent_min;
+
     gpio_init(BOTAO_A);
     gpio_set_dir(BOTAO_A, GPIO_IN);
     gpio_pull_up(BOTAO_A);
@@ -291,19 +322,25 @@ int main()
     gpio_pull_up(BOTAO_B);
     gpio_set_irq_enabled_with_callback(BOTAO_B, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    gpio_init(LED_BLUE_PIN);
-    gpio_set_dir(LED_BLUE_PIN, GPIO_OUT);
+    gpio_init(BOTAO_SW);
+    gpio_set_dir(BOTAO_SW, GPIO_IN);
+    gpio_pull_up(BOTAO_SW);
+    gpio_set_irq_enabled_with_callback(BOTAO_SW, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+
+    init_bombas_gpio(); // Inicializa GPIOs das bombas
+    // gpio_init(LED_BLUE_PIN); // Removido
+    // gpio_set_dir(LED_BLUE_PIN, GPIO_OUT); // Removido
 
     stdio_init_all();
     sleep_ms(1000);
 
     adc_init();
-    adc_gpio_init(JOYSTICK_X); // GPIO26 = ADC0
-    adc_gpio_init(JOYSTICK_Y); // GPIO27 = ADC1
+    adc_gpio_init(BOIA_ADC_PIN); // Configura GPIO28 (ADC2) para a boia
+    // adc_gpio_init(JOYSTICK_X); // Removido
+    // adc_gpio_init(JOYSTICK_Y); // Removido
 
-    matriz_init(WS2812_PIN);
-
-    buzzer_init(BUZZER_PIN);
+    // matriz_init(WS2812_PIN); // Removido
+    // buzzer_init(BUZZER_PIN); // Removido
 
     ssd1306_t ssd;
     init_Display(&ssd);
@@ -341,52 +378,64 @@ int main()
     ssd1306_send_data(&ssd);
 
     start_http_server();
-    char str_x[5]; // Buffer para armazenar a string
-    char status[24];
-    char limite_str[8];
-    bool cor = true;
 
-    atualizar_leds();
-    atualizar_buzzer();
+    // Strings para o display OLED
+    char str_nivel_boia[10];
+    char str_faixa_op[15];
+    char str_bombas_status[15];
+    bool cor = true;
 
     while (true)
     {
         cyw43_arch_poll();
 
-        adc_select_input(0);
-        uint16_t adc_value_x = adc_read();
+        adc_select_input(2); // Seleciona ADC2 (GPIO28) para leitura da boia
+        uint16_t adc_valor_boia = adc_read();
+        g_nivel_boia_pc = (float)adc_para_percentual_boia(adc_valor_boia);
 
-        int16_t mudanca = adc_value_x - 2048; // Ajuste para calcular a diferença do centro do joystick
+        // Atualiza variáveis de compatibilidade para o HTML
+        nivel_percentual_compat = g_nivel_boia_pc;
+        // limite_percentual_compat é atualizado na IRQ do botão A
 
-        if (abs(mudanca) > 500)
+        // Lógica de Histerese para controle das bombas
+        FaixaOperacao faixa_atual = faixas_disponiveis[g_indice_faixa_selecionada];
+        int nivel_min_pc_faixa = faixa_atual.percent_min;
+        int nivel_max_pc_faixa = faixa_atual.percent_max;
+
+        if (g_bombas_ligadas)
         {
-            nivel_percentual += (mudanca > 0) ? STEP : -STEP;
+            if (g_nivel_boia_pc >= nivel_max_pc_faixa)
+            {
+                controlar_bombas(false); // Desliga
+            }
+        }
+        else
+        {
+            if (g_nivel_boia_pc < nivel_min_pc_faixa)
+            {
+                controlar_bombas(true); // Liga
+            }
         }
 
-        atualizar_leds();
-        atualizar_buzzer();
-
-        sprintf(status, (nivel_percentual >= limite_percentual) ? "ACIMA" : "ABAIXO");
-        sprintf(str_x, "%.2f%%", nivel_percentual);
-        sprintf(limite_str, "%d%%", limite_percentual);
+        // Preparar strings para o display OLED
+        sprintf(str_nivel_boia, "%.1f%%", g_nivel_boia_pc);
+        sprintf(str_faixa_op, "%s", faixa_atual.nome_faixa);
+        sprintf(str_bombas_status, g_bombas_ligadas ? "LIGADAS" : "DESLIGADAS");
 
         ssd1306_fill(&ssd, !cor);
         ssd1306_rect(&ssd, 3, 3, 122, 60, cor, !cor);
         ssd1306_line(&ssd, 3, 30, 123, 30, cor);
-        ssd1306_draw_string(&ssd, "Limite: ", 10, 6);
-        ssd1306_draw_string(&ssd, limite_str, 70, 6);
+        ssd1306_draw_string(&ssd, "Faixa:", 10, 6);
+        ssd1306_draw_string(&ssd, str_faixa_op, 55, 6);
         ssd1306_draw_string(&ssd, ip_str, 10, 20);
-        ssd1306_draw_string(&ssd, "NIVEL / STATUS", 10, 35);
-        ssd1306_draw_string(&ssd, str_x, 10, 52);
-        ssd1306_draw_string(&ssd, status, 70, 52);
+        ssd1306_draw_string(&ssd, "Nivel:", 10, 35);
+        ssd1306_draw_string(&ssd, str_nivel_boia, 60, 35);
+        ssd1306_draw_string(&ssd, "Bombas:", 10, 52);
+        ssd1306_draw_string(&ssd, str_bombas_status, 60, 52);
         ssd1306_send_data(&ssd);
 
         sleep_ms(200);
     }
-
-    cyw43_arch_deinit();
-    return 0;
-
     cyw43_arch_deinit();
     return 0;
 }
