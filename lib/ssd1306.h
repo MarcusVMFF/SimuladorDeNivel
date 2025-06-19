@@ -5,6 +5,11 @@
 #define WIDTH 128
 #define HEIGHT 64
 
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define endereco 0x3C
+
 typedef enum {
   SET_CONTRAST = 0x81,
   SET_ENTIRE_ON = 0xA4,
@@ -47,3 +52,6 @@ void ssd1306_hline(ssd1306_t *ssd, uint8_t x0, uint8_t x1, uint8_t y, bool value
 void ssd1306_vline(ssd1306_t *ssd, uint8_t x, uint8_t y0, uint8_t y1, bool value);
 void ssd1306_draw_char(ssd1306_t *ssd, char c, uint8_t x, uint8_t y);
 void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y);
+
+void init_Display(ssd1306_t *ssd);
+void desenhar(ssd1306_t *ssd, const uint32_t desenho[8192]);

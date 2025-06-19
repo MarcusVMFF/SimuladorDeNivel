@@ -198,3 +198,33 @@ void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y)
     }
   }
 }
+
+void init_Display(ssd1306_t *ssd)
+{
+  // I2C Initialisation. Using it at 400Khz.
+  i2c_init(I2C_PORT, 400 * 1000);
+  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);                   // Set the GPIO pin function to I2C
+  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);                   // Set the GPIO pin function to I2C
+  gpio_pull_up(I2C_SDA);                                       // Pull up the data line
+  gpio_pull_up(I2C_SCL);                                       // Pull up the clock line
+  ssd1306_init(ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT); // Inicializa o display
+  ssd1306_config(ssd);                                         // Configura o display
+  ssd1306_send_data(ssd);                                      // Envia os dados para o display
+}
+
+void desenhar(ssd1306_t *ssd, const uint32_t desenho[8192])
+{
+  // Desenho feito ao exportar o arquivo no Piskelapp automatizado
+  for (int j = 0; j < 64; j++)
+  {
+    for (int i = 0; i < 128; i++)
+    {
+      int a = j * 128 + i;
+      if (desenho[a] >= 0xff000000)
+      {
+        ssd1306_pixel(ssd, i, j, true);
+      }
+    }
+  }
+  ssd1306_send_data(ssd); // Atualiza o display
+}
