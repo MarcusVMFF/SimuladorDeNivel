@@ -37,6 +37,12 @@
 // float nivel_percentual = 20; // Será atualizado pela boia
 
 // Estrutura para pontos de calibração da boia (ADC, Percentual)
+typedef struct
+{
+    uint16_t adc_val;
+    int percent_val;
+} PontoCalibracaoBoia;
+
 // Estrutura para faixas de operação
 typedef struct
 {
@@ -44,6 +50,13 @@ typedef struct
     int percent_max;
     const char *nome_faixa; // Para exibição
 } FaixaOperacao;
+
+// --- Variáveis Globais do Sistema de Nível ---
+static const PontoCalibracaoBoia pontos_calibracao_boia[] = {
+    {200, 0}, {1200, 10}, {1300, 20}, {1400, 30}, {1500, 40}, {1600, 50}, {1700, 60}, {1800, 70}, {2000, 75}, {2100, 76}, {2200, 77}, {2400, 78}, {2800, 80}
+
+};
+static const int num_pontos_calibracao = sizeof(pontos_calibracao_boia) / sizeof(pontos_calibracao_boia[0]);
 
 static const FaixaOperacao faixas_disponiveis[] = {
     {0, 10, "0-10%"}, {10, 20, "10-20%"}, {20, 30, "20-30%"}, {30, 40, "30-40%"}, {40, 50, "40-50%"}, {50, 60, "50-60%"}, {60, 70, "60-70%"}, {70, 80, "70-80%"}};
@@ -234,25 +247,18 @@ static void start_http_server(void)
 // Função para converter leitura ADC da boia para percentual
 int adc_para_percentual_boia(uint16_t adc_valor)
 {
-    const uint16_t adc_min = 200;  // Valor ADC para 0%
-    const uint16_t adc_max = 2800; // Valor ADC para 80%
-    const int percent_min = 0;
-    const int percent_max = 80;
-
-    if (adc_valor <= adc_min)
+    if (adc_valor <= pontos_calibracao_boia[0].adc_val)
     {
-        return percent_min;
+        return pontos_calibracao_boia[0].percent_val;
     }
-    if (adc_valor >= adc_max)
+    for (int i = num_pontos_calibracao - 1; i >= 0; i--)
     {
-        return percent_max;
+        if (adc_valor >= pontos_calibracao_boia[i].adc_val)
+        {
+            return pontos_calibracao_boia[i].percent_val;
+        }
     }
-
-    // Interpolação linear
-    // percentual = ((adc_lido - adc_min) / (adc_max - adc_min)) * (percent_max - percent_min) + percent_min
-    // Como percent_min é 0, simplifica para:
-    // percentual = ((adc_lido - adc_min) / (adc_max - adc_min)) * percent_max
-    return (int)(((float)(adc_valor - adc_min) / (adc_max - adc_min)) * percent_max);
+    return pontos_calibracao_boia[0].percent_val;
 }
 
 // Função para controlar as bombas (define o estado dos GPIOs)
