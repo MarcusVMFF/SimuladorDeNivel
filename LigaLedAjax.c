@@ -205,24 +205,51 @@ static void start_http_server(void)
     printf("Servidor HTTP rodando na porta 80...\n");
 }
 
+// --- Configuração dos Níveis Discretos da Boia ---
+// Valores ADC que definem cada nível. Do nível 0 ao nível 12.
+static const uint16_t ADC_LEVEL_VALUES[] = {
+    200,  // Nível 0 (0%)
+    1200, // Nível 1
+    1300, // Nível 2
+    1400, // Nível 3
+    1500, // Nível 4
+    1600, // Nível 5
+    1700, // Nível 6
+    1800, // Nível 7
+    2000, // Nível 8
+    2100, // Nível 9
+    2200, // Nível 10
+    2400, // Nível 11
+    2800  // Nível 12 (80%)
+};
+static const int NUM_ADC_LEVELS = sizeof(ADC_LEVEL_VALUES) / sizeof(ADC_LEVEL_VALUES[0]);
+static const float MAX_PERCENTAGE_MAPPED = 80.0f; // O último nível (2800) corresponde a 80%
+
 // Função para converter leitura ADC da boia para percentual
 int adc_para_percentual_boia(uint16_t adc_valor)
 {
-    const uint16_t adc_min_cal = 200;  // Valor ADC para 0%
-    const uint16_t adc_max_cal = 2800; // Valor ADC para 80%
-    const int percent_min_cal = 0;
-    const int percent_max_cal = 80;
+    // Se o valor ADC for menor ou igual ao primeiro nível, retorna 0%
+    if (adc_valor <= ADC_LEVEL_VALUES[0])
+    {
+        return 0; // Percentual do nível 0
+    }
+    // Se o valor ADC for maior ou igual ao último nível, retorna o percentual máximo mapeado (80%)
+    if (adc_valor >= ADC_LEVEL_VALUES[NUM_ADC_LEVELS - 1])
+    {
+        return (int)MAX_PERCENTAGE_MAPPED; // Percentual do último nível
+    }
 
-    if (adc_valor <= adc_min_cal)
+    for (int i = NUM_ADC_LEVELS - 2; i >= 0; --i)
     {
-        return percent_min_cal;
+        if (adc_valor >= ADC_LEVEL_VALUES[i])
+        {
+            // O valor ADC atingiu ou ultrapassou o limiar do nível 'i'.
+            // O percentual é (i / (total de intervalos)) * percentual_maximo
+            float percentage = (i / (float)(NUM_ADC_LEVELS - 1)) * MAX_PERCENTAGE_MAPPED;
+            return (int)percentage;
+        }
     }
-    if (adc_valor >= adc_max_cal)
-    {
-        return percent_max_cal;
-    }
-    // Interpolação linear
-    return (int)(((float)(adc_valor - adc_min_cal) / (adc_max_cal - adc_min_cal)) * percent_max_cal);
+    return 0;
 }
 
 void gpio_irq_handler(uint gpio, uint32_t event)
