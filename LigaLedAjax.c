@@ -18,8 +18,8 @@
 #define BOMBA_ESVAZIAR_PIN 16
 #define BOMBA_ENCHER_PIN 17
 
-#define WIFI_SSID "RaGus2.5GHZ"
-#define WIFI_PASS "#RaGus2.5GHZ6258"
+#define WIFI_SSID ""
+#define WIFI_PASS ""
 
 // --- Variáveis Globais do Sistema de Nível ---
 int g_nivel_min_pc = 20;              // Nível mínimo padrão para ligar a bomba de encher
