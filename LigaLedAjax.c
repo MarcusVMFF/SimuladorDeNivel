@@ -250,6 +250,8 @@ int adc_para_percentual_boia(uint16_t adc_valor)
     return 0;
 }
 
+volatile bool button_pressed = false;
+
 void gpio_irq_handler(uint gpio, uint32_t event)
 {
     uint32_t current_time = to_us_since_boot(get_absolute_time());
@@ -267,6 +269,10 @@ void gpio_irq_handler(uint gpio, uint32_t event)
         {
             printf("Botao B pressionado: Entrando no modo bootloader USB...\n");
             reset_usb_boot(0, 0);
+        }
+        else if (gpio == BOTAO_SW)
+        {
+            button_pressed = true;
         }
         last_time = current_time;
     }
@@ -339,7 +345,7 @@ int main()
     gpio_init(BOTAO_SW);
     gpio_set_dir(BOTAO_SW, GPIO_IN);
     gpio_pull_up(BOTAO_SW);
-    gpio_set_irq_enabled(BOTAO_B, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(BOTAO_SW, GPIO_IRQ_EDGE_FALL, true);
 
     uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);
     char ip_str[24];
@@ -359,8 +365,9 @@ int main()
     char str_bomba_esvaziar_status_display[10];
     bool cor = true;
 
+    bool state = true;
     gpio_init(BOMBA_ESVAZIAR_PIN);
-    gpio_set_dir(BOMBA_ESVAZIAR_PIN, GPIO_OUT);
+    gpio_set_dir(BOMBA_ESVAZIAR_PIN, state);
     gpio_put(BOMBA_ESVAZIAR_PIN, 1); // Começa desligada
     g_bomba_esvaziar_ligada = false;
 
@@ -368,13 +375,19 @@ int main()
     gpio_set_dir(BOMBA_ENCHER_PIN, GPIO_OUT);
     gpio_put(BOMBA_ENCHER_PIN, 1); // Começa desligada
     g_bomba_encher_ligada = false;
+    uint32_t adc_valor_boia;
 
     while (true)
     {
         cyw43_arch_poll();
 
         adc_select_input(2); // Seleciona ADC2 (GPIO28) para leitura da boia
-        uint16_t adc_valor_boia = adc_read();
+        // Faz a media de 100 valores para reduzir o ruído
+        for (int i = 0; i < 100; i++)
+        {
+           adc_valor_boia += adc_read();
+        }
+        adc_valor_boia = adc_valor_boia/100.0;
         g_nivel_boia_pc = (float)adc_para_percentual_boia(adc_valor_boia);
 
         // Atualiza variáveis de compatibilidade para o HTML
@@ -399,16 +412,12 @@ int main()
             }
         }
 
-        if (gpio_get(BOTAO_SW) == 0)
+        if (button_pressed)
         {
-            g_bomba_esvaziar_ligada = true;
+            button_pressed = false;
+            state = !state;
+            gpio_put(BOMBA_ESVAZIAR_PIN, state);
         }
-        else
-        {
-            g_bomba_esvaziar_ligada = false;
-        }
-
-        gpio_put(BOMBA_ESVAZIAR_PIN, !g_bomba_esvaziar_ligada);
 
         // Preparar strings para o display OLED
         sprintf(str_nivel_boia_display, "%.1f%%", g_nivel_boia_pc);
