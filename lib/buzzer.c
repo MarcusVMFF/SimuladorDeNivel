@@ -28,14 +28,11 @@ void buzzer_play(uint BUZZER_PIN, uint freq, uint duration_ms)
     // Ativa o PWM
     pwm_set_enabled(slice_num, true);
 
-    // Toca o som pelo tempo especificado
-    sleep_ms(duration_ms);
 
     // Desativa o PWM
     pwm_set_enabled(slice_num, false);
 
-    // Pausa entre os tons
-    sleep_ms(20);
+   
 }
 
 #endif

@@ -11,6 +11,8 @@
 #include "font.h"
 #include "pico/bootrom.h"
 #include "lib/functions.h"
+#include "lib/matrizLed.h"
+#include "lib/buzzer.h"
 
 #define BOTAO_A 5
 #define BOTAO_B 6
@@ -18,6 +20,12 @@
 #define BOIA_ADC_PIN 28
 #define BOMBA_ESVAZIAR_PIN 16
 #define BOMBA_ENCHER_PIN 17
+#define LED_BLUE_PIN 12
+#define LED_RED_PIN 13
+
+#define WS2812_PIN 7
+#define NUM_PIXELS 25
+#define BUZZER_PIN 21
 
 // --- Variáveis Globais do Sistema de Nível ---
 int g_nivel_min_pc = 20;              // Nível mínimo padrão para ligar a bomba de encher
@@ -34,6 +42,20 @@ volatile uint32_t last_time = 0;
 #define XSTR(x) STR(x)
 #define STR(x) #x
 
+bool leds_Normal[NUM_PIXELS] = {
+    0, 1, 1, 1, 0,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    0, 1, 1, 1, 0};
+
+bool leds_Alerta[NUM_PIXELS] = {
+    0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1,
+    0, 1, 1, 1, 0,
+    0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0};
+
 const char HTML_BODY[] =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Reservatorio</title>"
     "<style>"
@@ -42,36 +64,45 @@ const char HTML_BODY[] =
     ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
     ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
     "@media (max-width: 600px) { .barra { width: 80%; } }"
+    "label { margin-right: 10px; }"
+    "input { margin-right: 10px; }"
     "</style>"
     "<script>"
     "function atualizar() {"
-    "  fetch('/estado').then(res => res.json()).then(data => {"
-    "    let x = Number(data.x);"
-    "    let min = Number(data.min);"
-    "    let max = Number(data.max);"
-    "    let limite = Number(data.limite);"
-    "    if (isNaN(x)) x = min;"
-    "    if (x < min) x = min;"
-    "    if (x > max) x = max;"
-    "    let percentual = ((x - min) / (max - min)) * 100;"
-    "    percentual = Math.min(100, Math.max(0, percentual));"
-    "    document.getElementById('x_valor').innerText = x;"
-    "    document.getElementById('barra_x').style.width = percentual + '%';"
-    "    let statusText = (percentual >= limite) ? 'Acima (Desligada)' : 'Abaixo (Ligada)';"
-    "    document.getElementById('status').innerText = statusText;"
-    "  }).catch(err => {"
-    "    console.error('Erro:', err);"
-    "    document.getElementById('x_valor').innerText = '--';"
-    "    document.getElementById('barra_x').style.width = '0%';"
-    "    document.getElementById('status').innerText = '--';"
-    "  });"
+    "   fetch('/estado').then(res => res.json()).then(data => {"
+    "     let x = Number(data.x);"
+    "     let min = Number(data.min);"
+    "     let max = Number(data.max);"
+    "     let limite = Number(data.limite);"
+    "     if (isNaN(x)) x = min;"
+    "     if (x < min) x = min;"
+    "     if (x > max) x = max;"
+    "     let percentual = ((x - min) / (max - min)) * 100;"
+    "     percentual = Math.min(100, Math.max(0, percentual));"
+    "     document.getElementById('x_valor').innerText = x;"
+    "     document.getElementById('barra_x').style.width = percentual + '%';"
+    "     let statusText = (percentual >= limite) ? 'Acima (Desligada)' : 'Abaixo (Ligada)';"
+    "     document.getElementById('status').innerText = statusText;"
+    "   }).catch(err => {"
+    "     console.error('Erro:', err);"
+    "     document.getElementById('x_valor').innerText = '--';"
+    "     document.getElementById('barra_x').style.width = '0%';"
+    "     document.getElementById('status').innerText = '--';"
+    "   });"
     "}"
-    "function enviarConfig() {"
-    "  const limite = document.getElementById('limite').value;"
-    "  fetch(`/config?limite=${limite}`).then(res => {"
-    "    if (res.ok) alert('Limite atualizado!');"
-    "    else alert('Erro ao atualizar limite.');"
-    "  });"
+    "function enviarConfigMax() {"
+    "   const limiteMax = document.getElementById('limiteMax').value;"
+    "   fetch(`/config?limite=${limiteMax}`).then(res => {"
+    "     if (res.ok) alert('Limite MÁXIMO atualizado!');"
+    "     else alert('Erro ao atualizar limite MÁXIMO.');"
+    "   });"
+    "}"
+    "function enviarConfigMin() {"
+    "   const limiteMin = document.getElementById('limiteMin').value;"
+    "   fetch(`/configmin?limite=${limiteMin}`).then(res => {"
+    "     if (res.ok) alert('Limite MÍNIMO atualizado!');"
+    "     else alert('Erro ao atualizar limite MÍNIMO.');"
+    "   });"
     "}"
     "setInterval(atualizar, 1000);"
     "</script></head><body>"
@@ -82,19 +113,26 @@ const char HTML_BODY[] =
     "<p class='label'>Status (Da Bomba): <span id='status'>--</span></p>"
 
     "<hr><h2>Configurar Limite Percentual</h2>"
-    "<form onsubmit='enviarConfig(); return false;'>"
-    "<label for='limite'>Limite (%):</label>"
-    "<input type='number' id='limite' name='limite' value='50' min='0' max='100'><br><br>"
-    "<button type='submit'>Atualizar Limite</button></form>"
+
+    "<form onsubmit='enviarConfigMax(); return false;'>"
+    "<label for='limiteMax'>Limite MÁXIMO(%):</label>"
+    "<input type='number' id='limiteMax' name='limiteMax' value='50' min='0' max='100'>"
+    "<button type='submit'>Atualizar Limite MÁXIMO</button></form>"
+    "<br><br>"
+
+    "<form onsubmit='enviarConfigMin(); return false;'>"
+    "<label for='limiteMin'>Limite MÍNIMO(%):</label>"
+    "<input type='number' id='limiteMin' name='limiteMin' value='20' min='0' max='limiteMax'>"
+    "<button type='submit'>Atualizar Limite MÍNIMO</button></form>"
 
     "<hr style='margin-top: 20px;'>"
     "<p style='font-size: 15px; color: #336699; font-style: italic; max-width: 90%; margin: 10px auto;'>"
-    "Visualização do valor analógico do eixo X via rede Wi-Fi com BitDogLab"
+    "No momento que o limite mínimo é atingido, a bomba enche o reservatório até atingir o limite máximo."
     "</p></body></html>";
 
 struct http_state
 {
-    char response[4096];
+    char response[4095];
     size_t len;
     size_t sent;
 };
@@ -124,29 +162,38 @@ int get_param_val(const char *query, const char *key)
 
 static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
 {
+
     if (!p)
     {
+        printf("PBUF nulo, fechando conexão.\n"); // Debug
         tcp_close(tpcb);
         return ERR_OK;
     }
 
     char *req = (char *)p->payload;
+
+    printf("Requisição recebida: %.*s\n", (int)p->len, req);
+    printf("Conteúdo da requisição (primeiros 20 chars): '%.20s'\n", req);
+
     struct http_state *hs = malloc(sizeof(struct http_state));
     if (!hs)
     {
+        printf("Erro: Falha ao alocar http_state.\n"); // Debug
         pbuf_free(p);
         tcp_close(tpcb);
         return ERR_MEM;
     }
+    printf("http_state alocado. Verificando tipo de requisição...\n"); // Debug
+
     hs->sent = 0;
 
-    if (strstr(req, "GET /estado"))
+        if (strncmp(req, "GET /estado", strlen("GET /estado")) == 0) // <--- Corrigido aqui
     {
-
+        printf("Requisição GET /estado\n");
         char json_payload[128];
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
-                                nivel_percentual_compat, 0, 100, (uint16_t)g_nivel_min_pc); // Usa g_nivel_min_pc para 'limite'
+                                 "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
+                                 nivel_percentual_compat, 0, 100, (uint16_t)g_nivel_max_pc);
 
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
@@ -156,11 +203,59 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "\r\n"
                            "%s",
                            json_len, json_payload);
+        printf("Resposta /estado gerada. Tamanho: %d\n", (int)hs->len);
     }
-    // O endpoint GET /config do HTML original não será mais processado aqui.
-    // O formulário no HTML antigo não terá efeito.
-    else
+    else if (strncmp(req, "GET /config", strlen("GET /config")) == 0) // <--- Corrigido aqui
     {
+        printf("Requisição GET /config\n");
+        int novo_limite = get_param_val(req, "limite");
+
+        if (novo_limite >= 0 && novo_limite <= 100)
+        {
+            g_nivel_max_pc = novo_limite;
+            printf("Novo g_nivel_max_pc: %d\n", g_nivel_max_pc);
+        }
+        else {
+            printf("Limite recebido inválido: %d\n", novo_limite);
+        }
+
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                           "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: text/plain\r\n"
+                           "Content-Length: 2\r\n"
+                           "Connection: close\r\n"
+                           "\r\n"
+                           "OK");
+        printf("Resposta /config gerada. Tamanho: %d\n", (int)hs->len);
+    }
+    else if (strncmp(req, "GET /configmin", strlen("GET /configmin")) == 0) // <--- Corrigido aqui
+    {
+        printf("Requisição GET /configmin\n");
+        int novo_limite = get_param_val(req, "limite");
+
+        if (novo_limite >= 0 && novo_limite <= 100)
+        {
+            g_nivel_min_pc = novo_limite;
+            printf("Novo g_nivel_min_pc: %d\n", g_nivel_min_pc);
+        }
+        else {
+            printf("Limite recebido inválido: %d\n", novo_limite);
+        }
+
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                           "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: text/plain\r\n"
+                           "Content-Length: 2\r\n"
+                           "Connection: close\r\n"
+                           "\r\n"
+                           "OK");
+        printf("Resposta /configmin gerada. Tamanho: %d\n", (int)hs->len);
+    }
+    // Para a página principal (GET /)
+    // Cuidado com o espaço após o '/'. Alguns navegadores enviam "GET / HTTP/1.1", outros "GET /HTTP/1.1"
+    else if (strncmp(req, "GET / ", strlen("GET / ")) == 0 || strncmp(req, "GET /HTTP", strlen("GET /HTTP")) == 0) // <--- Corrigido aqui e adicionada uma segunda condição
+    {
+        printf("Requisição GET / (página principal)\n");
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: text/html\r\n"
@@ -169,15 +264,36 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "\r\n"
                            "%s",
                            (int)strlen(HTML_BODY), HTML_BODY);
+
+        printf("Preparando para enviar resposta. Tamanho: %d\n", (int)hs->len);
+    }
+    else // Requisições não tratadas (ex: /favicon.ico)
+    {
+        printf("Requisição desconhecida/não tratada: %.*s\n", (int)p->len, req);
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                           "HTTP/1.1 404 Not Found\r\n"
+                           "Content-Length: 0\r\n"
+                           "Connection: close\r\n"
+                           "\r\n");
+        printf("Resposta 404 Not Found gerada.\n");
     }
 
     pbuf_free(p);
     tcp_arg(tpcb, hs);
     tcp_sent(tpcb, http_sent);
-    tcp_write(tpcb, hs->response, hs->len, TCP_WRITE_FLAG_COPY);
+    err_t write_err = tcp_write(tpcb, hs->response, hs->len, TCP_WRITE_FLAG_COPY);
+    if (write_err != ERR_OK)
+    {
+        printf("Erro ao escrever dados TCP: %d (erro lwIP)\n", write_err);
+    }
+    else {
+        printf("tcp_write chamado com sucesso.\n");
+    }
     tcp_output(tpcb);
+    printf("Dados TCP enviados. Pbuf liberado.\n");
     return ERR_OK;
 }
+
 
 static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 {
@@ -187,20 +303,30 @@ static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 
 static void start_http_server(void)
 {
+    printf("Tentando criar PCB TCP...\n"); // Debug
     struct tcp_pcb *pcb = tcp_new();
     if (!pcb)
     {
-        printf("Erro ao criar PCB TCP\n");
+        printf("Erro ao criar PCB TCP\n"); // Mensagem original
         return;
     }
+    printf("PCB TCP criado. Tentando ligar na porta 80...\n"); // Debug
     if (tcp_bind(pcb, IP_ADDR_ANY, 80) != ERR_OK)
     {
-        printf("Erro ao ligar o servidor na porta 80\n");
+        printf("Erro ao ligar o servidor na porta 80\n"); // Mensagem original
+        tcp_close(pcb);                                   // Garante que o PCB seja liberado se a ligação falhar
         return;
     }
+    printf("Servidor TCP ligado. Tentando escutar...\n"); // Debug
     pcb = tcp_listen(pcb);
+    if (!pcb)
+    {                                                   // Verifica se tcp_listen retornou NULL (erro)
+        printf("Erro ao iniciar escuta do servidor\n"); // Debug
+        return;
+    }
+    printf("Servidor TCP escutando. Configurando callback de aceitação...\n"); // Debug
     tcp_accept(pcb, connection_callback);
-    printf("Servidor HTTP rodando na porta 80...\n");
+    printf("Servidor HTTP rodando na porta 80...\n"); // Mensagem original
 }
 
 // --- Configuração dos Níveis Discretos da Boia ---
@@ -218,13 +344,13 @@ static const uint16_t ADC_LEVEL_VALUES[] = {
     2100, // Nível 9
     2200, // Nível 10
     2400, // Nível 11
-    2800  // Nível 12 (80%)
+    2800  // Nível 12 (100%)
 };
 static const int NUM_ADC_LEVELS = sizeof(ADC_LEVEL_VALUES) / sizeof(ADC_LEVEL_VALUES[0]);
-static const float MAX_PERCENTAGE_MAPPED = 80.0f; // O último nível (2800) corresponde a 80%
+static const float MAX_PERCENTAGE_MAPPED = 100.0f; // O último nível (2800) corresponde a 100%
 
 // Função para converter leitura ADC da boia para percentual
-int adc_para_percentual_boia(uint16_t adc_valor)
+int adc_para_percentual_boia(uint32_t adc_valor)
 {
     // Se o valor ADC for menor ou igual ao primeiro nível, retorna 0%
     if (adc_valor <= ADC_LEVEL_VALUES[0])
@@ -283,6 +409,26 @@ void gpio_irq_handler(uint gpio, uint32_t event)
 char WIFI_SSID[CREDENTIAL_BUFFER_SIZE]; // Substitua pelo nome da sua rede Wi-Fi
 char WIFI_PASS[CREDENTIAL_BUFFER_SIZE]; // Substitua pela senha da sua rede Wi-Fi
 
+static bool switch_led_status = false;
+void atualizar_leds()
+{
+
+    if (nivel_percentual_compat >= g_nivel_max_pc)
+    {
+        switch_led_status = false;
+        set_one_led(0, 10, 0, leds_Normal);
+        gpio_put(LED_BLUE_PIN, 1); // liga o LED azul
+        gpio_put(LED_RED_PIN, 0);  // Desliga o LED vermelho
+    }
+    else if (nivel_percentual_compat <= g_nivel_min_pc || switch_led_status)
+    {
+        switch_led_status = true;
+        set_one_led(10, 0, 0, leds_Alerta);
+        gpio_put(LED_BLUE_PIN, 0); // Desliga o LED azul
+        gpio_put(LED_RED_PIN, 1);  // Liga o LED vermelho
+    }
+}
+
 int main()
 {
     // Inicializa as variáveis de compatibilidade com o HTML
@@ -290,7 +436,13 @@ int main()
     limite_percentual_compat = g_nivel_min_pc; // Usa o g_nivel_min_pc padrão
 
     stdio_init_all();
-    sleep_ms(1000);
+
+    gpio_init(LED_BLUE_PIN);
+    gpio_set_dir(LED_BLUE_PIN, GPIO_OUT);
+    gpio_init(LED_RED_PIN);
+    gpio_set_dir(LED_RED_PIN, GPIO_OUT);
+    matriz_init(WS2812_PIN);
+    buzzer_init(BUZZER_PIN);
 
     adc_init();
     adc_gpio_init(BOIA_ADC_PIN);
@@ -305,6 +457,7 @@ int main()
     ssd1306_send_data(&ssd);
 
     waitUSB();
+    printf("Tamanho do HTML_BODY: %d bytes\n", (int)strlen(HTML_BODY));
     wifi_Credentials(WIFI_SSID, WIFI_PASS);
 
     ssd1306_config(&ssd);
@@ -375,19 +528,20 @@ int main()
     gpio_set_dir(BOMBA_ENCHER_PIN, GPIO_OUT);
     gpio_put(BOMBA_ENCHER_PIN, 1); // Começa desligada
     g_bomba_encher_ligada = false;
-    uint32_t adc_valor_boia;
 
     while (true)
     {
+
         cyw43_arch_poll();
 
         adc_select_input(2); // Seleciona ADC2 (GPIO28) para leitura da boia
         // Faz a media de 100 valores para reduzir o ruído
+        uint32_t adc_valor_boia = 0;
         for (int i = 0; i < 100; i++)
         {
-           adc_valor_boia += adc_read();
+            adc_valor_boia += adc_read();
         }
-        adc_valor_boia = adc_valor_boia/100.0;
+        adc_valor_boia = adc_valor_boia / 100.0;
         g_nivel_boia_pc = (float)adc_para_percentual_boia(adc_valor_boia);
 
         // Atualiza variáveis de compatibilidade para o HTML
@@ -415,6 +569,7 @@ int main()
         if (button_pressed)
         {
             button_pressed = false;
+            g_bomba_esvaziar_ligada = !g_bomba_esvaziar_ligada;
             state = !state;
             gpio_put(BOMBA_ESVAZIAR_PIN, state);
         }
@@ -438,7 +593,9 @@ int main()
         ssd1306_draw_string(&ssd, str_bomba_esvaziar_status_display, 105, 52);
         ssd1306_send_data(&ssd);
 
-        sleep_ms(200);
+        atualizar_leds(); // Atualiza a matriz de LEDs
+
+        sleep_ms(10);
     }
     cyw43_arch_deinit();
     return 0;
