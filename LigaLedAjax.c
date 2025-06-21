@@ -29,7 +29,7 @@
 
 // --- Variáveis Globais do Sistema de Nível ---
 int g_nivel_min_pc = 20;              // Nível mínimo padrão para ligar a bomba de encher
-int g_nivel_max_pc = 40;              // Nível máximo padrão para desligar a bomba de encher
+int g_nivel_max_pc = 50;              // Nível máximo padrão para desligar a bomba de encher
 float g_nivel_boia_pc = 0.0f;         // Nível atual da boia em percentual
 bool g_bomba_encher_ligada = false;   // Estado da bomba de encher
 bool g_bomba_esvaziar_ligada = false; // Estado da bomba de esvaziar
@@ -74,15 +74,12 @@ const char HTML_BODY[] =
     "     let min = Number(data.min);"
     "     let max = Number(data.max);"
     "     let limite = Number(data.limite);"
-    "     if (isNaN(x)) x = min;"
-    "     if (x < min) x = min;"
-    "     if (x > max) x = max;"
-    "     let percentual = ((x - min) / (max - min)) * 100;"
-    "     percentual = Math.min(100, Math.max(0, percentual));"
+    "     let percentual = x;"
     "     document.getElementById('x_valor').innerText = x;"
     "     document.getElementById('barra_x').style.width = percentual + '%';"
-    "     let statusText = (percentual >= limite) ? 'Acima (Desligada)' : 'Abaixo (Ligada)';"
+    "     let statusText = (limite) ? 'Ligada' : 'Desligado';"
     "     document.getElementById('status').innerText = statusText;"
+    " document.getElementById('limiteMin').max = max - 15;"
     "   }).catch(err => {"
     "     console.error('Erro:', err);"
     "     document.getElementById('x_valor').innerText = '--';"
@@ -92,16 +89,20 @@ const char HTML_BODY[] =
     "}"
     "function enviarConfigMax() {"
     "   const limiteMax = document.getElementById('limiteMax').value;"
-    "   fetch(`/config?limite=${limiteMax}`).then(res => {"
-    "     if (res.ok) alert('Limite MÁXIMO atualizado!');"
+    "   fetch(`/configmax?limite=${limiteMax}`).then(res => {"
+    "     if (res.ok) { "
+    "alert('Limite MÁXIMO atualizado!');"
+    "  atualizar();}"
     "     else alert('Erro ao atualizar limite MÁXIMO.');"
     "   });"
     "}"
     "function enviarConfigMin() {"
     "   const limiteMin = document.getElementById('limiteMin').value;"
     "   fetch(`/configmin?limite=${limiteMin}`).then(res => {"
-    "     if (res.ok) alert('Limite MÍNIMO atualizado!');"
-    "     else alert('Erro ao atualizar limite MÍNIMO.');"
+    "     if (res.ok) { "
+    "alert('Limite MÍNIMO atualizado!');"
+    "  atualizar();}"
+    "     else alert('Erro o limite MÍNIMO precisar ser menor que o limite MÁXIMO em 8 unidades.');"
     "   });"
     "}"
     "setInterval(atualizar, 1000);"
@@ -110,7 +111,7 @@ const char HTML_BODY[] =
     "<h1>Monitor do Reservatório</h1>"
     "<p class='label'>Nível da água: <span id='x_valor'>--</span>%</p>"
     "<div class='barra'><div id='barra_x' class='preenchimento'></div></div>"
-    "<p class='label'>Status (Da Bomba): <span id='status'>--</span></p>"
+    "<p class='label'>Status da Bomba: <span id='status'>--</span></p>"
 
     "<hr><h2>Configurar Limite Percentual</h2>"
 
@@ -122,7 +123,7 @@ const char HTML_BODY[] =
 
     "<form onsubmit='enviarConfigMin(); return false;'>"
     "<label for='limiteMin'>Limite MÍNIMO(%):</label>"
-    "<input type='number' id='limiteMin' name='limiteMin' value='20' min='0' max='limiteMax'>"
+    "<input type='number' id='limiteMin' name='limiteMin' value='20' min='0' max='100'>"
     "<button type='submit'>Atualizar Limite MÍNIMO</button></form>"
 
     "<hr style='margin-top: 20px;'>"
@@ -172,9 +173,6 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
 
     char *req = (char *)p->payload;
 
-    printf("Requisição recebida: %.*s\n", (int)p->len, req);
-    printf("Conteúdo da requisição (primeiros 20 chars): '%.20s'\n", req);
-
     struct http_state *hs = malloc(sizeof(struct http_state));
     if (!hs)
     {
@@ -183,17 +181,16 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
         tcp_close(tpcb);
         return ERR_MEM;
     }
-    printf("http_state alocado. Verificando tipo de requisição...\n"); // Debug
 
     hs->sent = 0;
 
-        if (strncmp(req, "GET /estado", strlen("GET /estado")) == 0) // <--- Corrigido aqui
+    if (strncmp(req, "GET /estado", strlen("GET /estado")) == 0) // <--- Corrigido aqui
     {
-        printf("Requisição GET /estado\n");
+
         char json_payload[128];
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                 "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
-                                 nivel_percentual_compat, 0, 100, (uint16_t)g_nivel_max_pc);
+                                "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
+                                nivel_percentual_compat, g_nivel_min_pc, g_nivel_max_pc, g_bomba_encher_ligada);
 
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
@@ -203,11 +200,10 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "\r\n"
                            "%s",
                            json_len, json_payload);
-        printf("Resposta /estado gerada. Tamanho: %d\n", (int)hs->len);
     }
-    else if (strncmp(req, "GET /config", strlen("GET /config")) == 0) // <--- Corrigido aqui
+    else if (strncmp(req, "GET /configmax", strlen("GET /configmax")) == 0) // <--- Corrigido aqui
     {
-        printf("Requisição GET /config\n");
+        printf("Requisição teste GET /config\n");
         int novo_limite = get_param_val(req, "limite");
 
         if (novo_limite >= 0 && novo_limite <= 100)
@@ -215,7 +211,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
             g_nivel_max_pc = novo_limite;
             printf("Novo g_nivel_max_pc: %d\n", g_nivel_max_pc);
         }
-        else {
+        else
+        {
             printf("Limite recebido inválido: %d\n", novo_limite);
         }
 
@@ -230,7 +227,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     }
     else if (strncmp(req, "GET /configmin", strlen("GET /configmin")) == 0) // <--- Corrigido aqui
     {
-        printf("Requisição GET /configmin\n");
+        printf("Requisição esse q quero GET /configmin\n");
         int novo_limite = get_param_val(req, "limite");
 
         if (novo_limite >= 0 && novo_limite <= 100)
@@ -238,7 +235,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
             g_nivel_min_pc = novo_limite;
             printf("Novo g_nivel_min_pc: %d\n", g_nivel_min_pc);
         }
-        else {
+        else
+        {
             printf("Limite recebido inválido: %d\n", novo_limite);
         }
 
@@ -286,14 +284,12 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     {
         printf("Erro ao escrever dados TCP: %d (erro lwIP)\n", write_err);
     }
-    else {
-        printf("tcp_write chamado com sucesso.\n");
+    else
+    {
     }
     tcp_output(tpcb);
-    printf("Dados TCP enviados. Pbuf liberado.\n");
     return ERR_OK;
 }
-
 
 static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err)
 {
@@ -386,8 +382,8 @@ void gpio_irq_handler(uint gpio, uint32_t event)
     {
         if (gpio == BOTAO_A)
         {
-            g_nivel_min_pc = 5;                        // Reseta para padrão
-            g_nivel_max_pc = 25;                       // Reseta para padrão
+            g_nivel_min_pc = 20;                        // Reseta para padrão
+            g_nivel_max_pc = 50;                       // Reseta para padrão
             limite_percentual_compat = g_nivel_min_pc; // Atualiza para HTML
             printf("Niveis resetados para Min: %d%% Max: %d%%\n", g_nivel_min_pc, g_nivel_max_pc);
         }
