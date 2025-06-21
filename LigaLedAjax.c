@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "lib/ssd1306.h"
+#include "lib/buzzer.h"
 #include "font.h"
 #include "pico/bootrom.h"
 #include "lib/functions.h"
@@ -16,6 +17,7 @@
 
 #define BOTAO_A 5
 #define BOTAO_B 6
+#define BUZZER_PIN 21
 #define BOTAO_SW 22
 #define BOIA_ADC_PIN 28
 #define BOMBA_ESVAZIAR_PIN 16
@@ -60,10 +62,10 @@ const char HTML_BODY[] =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Reservatorio</title>"
     "<style>"
     "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background: #f9f9f9; }"
-    ".barra { width: 30%; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0 auto 15px auto; height: 20px; }"
-    ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
+    ".barra { width: 250px; height: 340px; background: #ddd; border-radius: 6px; overflow: hidden; margin: 25px auto 25px auto; display: flex; flex-direction: column-reverse; }"
+    ".preenchimento { width: 100%; transition: height 0.3s ease; background: #2196F3; }"
     ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
-    "@media (max-width: 600px) { .barra { width: 80%; } }"
+    "@media (max-width: 600px) { .barra { height: 150px; } }"
     "label { margin-right: 10px; }"
     "input { margin-right: 10px; }"
     "</style>"
@@ -76,14 +78,14 @@ const char HTML_BODY[] =
     "     let limite = Number(data.limite);"
     "     let percentual = x;"
     "     document.getElementById('x_valor').innerText = x;"
-    "     document.getElementById('barra_x').style.width = percentual + '%';"
+    "     document.getElementById('barra_x').style.height = percentual + '%';"
     "     let statusText = (limite) ? 'Ligada' : 'Desligado';"
     "     document.getElementById('status').innerText = statusText;"
     " document.getElementById('limiteMin').max = max - 15;"
     "   }).catch(err => {"
     "     console.error('Erro:', err);"
     "     document.getElementById('x_valor').innerText = '--';"
-    "     document.getElementById('barra_x').style.width = '0%';"
+    "     document.getElementById('barra_x').style.height = '0%';"
     "     document.getElementById('status').innerText = '--';"
     "   });"
     "}"
@@ -382,7 +384,7 @@ void gpio_irq_handler(uint gpio, uint32_t event)
     {
         if (gpio == BOTAO_A)
         {
-            g_nivel_min_pc = 20;                        // Reseta para padrão
+            g_nivel_min_pc = 20;                       // Reseta para padrão
             g_nivel_max_pc = 50;                       // Reseta para padrão
             limite_percentual_compat = g_nivel_min_pc; // Atualiza para HTML
             printf("Niveis resetados para Min: %d%% Max: %d%%\n", g_nivel_min_pc, g_nivel_max_pc);
@@ -442,6 +444,9 @@ int main()
 
     adc_init();
     adc_gpio_init(BOIA_ADC_PIN);
+
+    buzzer_init(BUZZER_PIN);
+    uint slice_num = pwm_gpio_to_slice_num(BUZZER_PIN);
 
     ssd1306_t ssd;
     init_Display(&ssd);
@@ -551,6 +556,8 @@ int main()
             {
                 g_bomba_encher_ligada = false;
                 gpio_put(BOMBA_ENCHER_PIN, 1);
+
+                pwm_set_enabled(slice_num, false); // Desativa PWM
             }
         }
         else
@@ -559,6 +566,10 @@ int main()
             {
                 g_bomba_encher_ligada = true;
                 gpio_put(BOMBA_ENCHER_PIN, 0);
+
+                pwm_set_enabled(slice_num, true); // Ativa PWM para buzzer
+                buzzer_play(BUZZER_PIN, 1000, 200);
+                buzzer_play(BUZZER_PIN, 1500, 300);
             }
         }
 
