@@ -60,10 +60,10 @@ const char HTML_BODY[] =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Reservatorio</title>"
     "<style>"
     "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background: #f9f9f9; }"
-    ".barra { width: 30%; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0 auto 15px auto; height: 20px; }"
+    ".barra { width: 250px; height: 340px; background: #ddd; border-radius: 6px 6px 6px 6px; overflow: hidden; margin: 25px auto 25px auto; display: flex; flex-direction: column-reverse; }"
     ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
     ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
-    "@media (max-width: 600px) { .barra { width: 80%; } }"
+    "@media (max-width: 600px) { .barra { height: 150px; } }"
     "label { margin-right: 10px; }"
     "input { margin-right: 10px; }"
     "</style>"
@@ -76,7 +76,7 @@ const char HTML_BODY[] =
     "     let limite = Number(data.limite);"
     "     let percentual = x;"
     "     document.getElementById('x_valor').innerText = x;"
-    "     document.getElementById('barra_x').style.width = percentual + '%';"
+    "     document.getElementById('barra_x').style.height = percentual + '%';"
     "     let statusText = (limite) ? 'Ligada' : 'Desligado';"
     "     document.getElementById('status').innerText = statusText;"
     " document.getElementById('limiteMin').max = max - 15;"
@@ -329,12 +329,12 @@ static void start_http_server(void)
 // Valores ADC que definem cada nível. Do nível 0 ao nível 12.
 static const uint16_t ADC_LEVEL_VALUES[] = {
     200,  // Nível 0 (0%)
-    1200, // Nível 1
-    1300, // Nível 2
-    1400, // Nível 3
-    1500, // Nível 4
-    1600, // Nível 5
-    1700, // Nível 6
+    1200, // Nível 1 8%
+    1300, // Nível 2 16%
+    1400, // Nível 3  25%
+    1500, // Nível 4    33%
+    1600, // Nível 5    41%
+    1700, // Nível 6    50%
     1800, // Nível 7
     2000, // Nível 8
     2100, // Nível 9
@@ -382,7 +382,7 @@ void gpio_irq_handler(uint gpio, uint32_t event)
     {
         if (gpio == BOTAO_A)
         {
-            g_nivel_min_pc = 20;                        // Reseta para padrão
+            g_nivel_min_pc = 20;                       // Reseta para padrão
             g_nivel_max_pc = 50;                       // Reseta para padrão
             limite_percentual_compat = g_nivel_min_pc; // Atualiza para HTML
             printf("Niveis resetados para Min: %d%% Max: %d%%\n", g_nivel_min_pc, g_nivel_max_pc);
