@@ -53,10 +53,10 @@ const char HTML_BODY[] =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Reservatorio</title>"
     "<style>"
     "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background: #f9f9f9; }"
-    ".barra { width: 30%; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0 auto 15px auto; height: 20px; }"
-    ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
+    ".barra { width: 250px; height: 340px; background: #ddd; border-radius: 6px 6px 6px 6px; overflow: hidden; margin: 25px auto 25px auto; display: flex; flex-direction: column-reverse; }"
+    ".preenchimento { width: 100%; transition: height 0.3s ease; background: #2196F3; }"
     ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
-    "@media (max-width: 600px) { .barra { width: 80%; } }"
+    "@media (max-width: 600px) { .barra { height: 150px; } }"
     "</style>"
     "<script>"
     "function atualizar() {"
@@ -71,13 +71,13 @@ const char HTML_BODY[] =
     "    let percentual = ((x - min) / (max - min)) * 100;"
     "    percentual = Math.min(100, Math.max(0, percentual));"
     "    document.getElementById('x_valor').innerText = x;"
-    "    document.getElementById('barra_x').style.width = percentual + '%';"
+    "    document.getElementById('barra_x').style.height = percentual + '%';"
     "    let statusText = (percentual >= limite) ? 'Acima (Desligada)' : 'Abaixo (Ligada)';"
     "    document.getElementById('status').innerText = statusText;"
     "  }).catch(err => {"
     "    console.error('Erro:', err);"
     "    document.getElementById('x_valor').innerText = '--';"
-    "    document.getElementById('barra_x').style.width = '0%';"
+    "    document.getElementById('barra_x').style.height = '0%';"
     "    document.getElementById('status').innerText = '--';"
     "  });"
     "}"
@@ -249,17 +249,6 @@ void atualizar_leds()
 
     }
 }
-
-void atualizar_buzzer()
-{
-    if (nivel_percentual >= limite_percentual)
-    {
-        buzzer_play(BUZZER_PIN, 1000, 300);
-        buzzer_play(BUZZER_PIN, 1500, 300);
-        sleep_ms(200);
-    }
-}
-
 void gpio_irq_handler(uint gpio, uint32_t event)
 {
 
@@ -347,7 +336,7 @@ int main()
     bool cor = true;
 
     atualizar_leds();
-    atualizar_buzzer();
+    uint slice_num = pwm_gpio_to_slice_num(BUZZER_PIN);
 
     while (true)
     {
@@ -364,7 +353,16 @@ int main()
         }
 
         atualizar_leds();
-        atualizar_buzzer();
+        if (nivel_percentual >= limite_percentual)
+        {
+            pwm_set_enabled(slice_num, true); // Ativa PWM para buzzer
+            buzzer_play(BUZZER_PIN, 1000, 200);
+            buzzer_play(BUZZER_PIN, 1500, 300);
+        }
+        else
+        {
+            pwm_set_enabled(slice_num, false); // Desativa PWM 
+        }
 
         sprintf(status, (nivel_percentual >= limite_percentual) ? "ACIMA" : "ABAIXO");
         sprintf(str_x, "%.2f%%", nivel_percentual);
