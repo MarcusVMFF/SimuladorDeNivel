@@ -13,7 +13,6 @@
 #include "pico/bootrom.h"
 #include "lib/functions.h"
 #include "lib/matrizLed.h"
-#include "lib/buzzer.h"
 
 #define BOTAO_A 5
 #define BOTAO_B 6
@@ -65,8 +64,8 @@ const char HTML_BODY[] =
     ".on { background: #4CAF50; color: white; }"
     ".off { background: #f44336; color: white; }"
     "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background: #f9f9f9; }"
-    ".barra { width: 30%; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0 auto 15px auto; height: 20px; }"
-    ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
+    ".barra { width: 250px; height: 340px; background: #ddd; border-radius: 6px; overflow: hidden; margin: 25px auto 25px auto; display: flex; flex-direction: column-reverse; }"
+    ".preenchimento { width: 100%; transition: height 0.3s ease; background: #2196F3; }"
     ".label { font-weight: bold; margin-bottom: 5px; display: block; }"
     "@media (max-width: 600px) { .barra { height: 150px; } }"
     "label { margin-right: 10px; }"
@@ -232,7 +231,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
 
         char json_payload[128];
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                "{\"led\":%d,\"x\":%.0f,\"min\":%d,\"max\":%d,\"limite\":%d, \"bomba2_ligada\":%d}\r\n",                             // Adicione "bomba2_ligada"
+                                "{\"led\":%d,\"x\":%.0f,\"min\":%d,\"max\":%d,\"limite\":%d, \"bomba2_ligada\":%d}\r\n",                  // Adicione "bomba2_ligada"
                                 g_bomba_esvaziar_ligada, nivel_percentual_compat, g_nivel_min_pc, g_nivel_max_pc, g_bomba_encher_ligada); // Passe o estado da bomba de esvaziar
 
         hs->len = snprintf(hs->response, sizeof(hs->response),
@@ -482,13 +481,12 @@ int main()
     gpio_init(LED_RED_PIN);
     gpio_set_dir(LED_RED_PIN, GPIO_OUT);
     matriz_init(WS2812_PIN);
-    buzzer_init(BUZZER_PIN);
 
     adc_init();
     adc_gpio_init(BOIA_ADC_PIN);
 
     buzzer_init(BUZZER_PIN);
-    uint slice_num = pwm_gpio_to_slice_num(BUZZER_PIN);
+     uint slice_num_buzzer = pwm_gpio_to_slice_num(BUZZER_PIN); 
 
     ssd1306_t ssd;
     init_Display(&ssd);
@@ -585,6 +583,7 @@ int main()
             adc_valor_boia += adc_read();
         }
         adc_valor_boia = adc_valor_boia / 100.0;
+        printf("ADC Valor Boia: %d\n", adc_valor_boia);
         g_nivel_boia_pc = (float)adc_para_percentual_boia(adc_valor_boia);
 
         // Atualiza variáveis de compatibilidade para o HTML
@@ -598,8 +597,6 @@ int main()
             {
                 g_bomba_encher_ligada = false;
                 gpio_put(BOMBA_ENCHER_PIN, 1);
-
-                pwm_set_enabled(slice_num, false); // Desativa PWM
             }
         }
         else
@@ -608,10 +605,6 @@ int main()
             {
                 g_bomba_encher_ligada = true;
                 gpio_put(BOMBA_ENCHER_PIN, 0);
-
-                pwm_set_enabled(slice_num, true); // Ativa PWM para buzzer
-                buzzer_play(BUZZER_PIN, 1000, 200);
-                buzzer_play(BUZZER_PIN, 1500, 300);
             }
         }
 
@@ -641,6 +634,15 @@ int main()
         ssd1306_draw_string(&ssd, "Esv:", 75, 52);
         ssd1306_draw_string(&ssd, str_bomba_esvaziar_status_display, 105, 52);
         ssd1306_send_data(&ssd);
+
+        if (nivel_percentual_compat >= g_nivel_min_pc && nivel_percentual_compat <= g_nivel_max_pc)
+        {
+            buzzer_play(BUZZER_PIN, 1500); // Toca o buzzer a 1500 Hz
+        }
+        else // Se o nível estiver fora da faixa (muito baixo ou muito alto, ou outra condição que não queira o som)
+        {
+            pwm_set_enabled(slice_num_buzzer, false); // Desliga o PWM para o buzzer
+        }
 
         atualizar_leds(); // Atualiza a matriz de LEDs
 
