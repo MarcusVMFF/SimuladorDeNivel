@@ -59,6 +59,9 @@ bool leds_Alerta[NUM_PIXELS] = {
 const char HTML_BODY[] =
     "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Reservatorio</title>"
     "<style>"
+    ".botao { font-size: 20px; padding: 10px 30px; margin: 10px; border: none; border-radius: 8px; }"
+    ".on { background: #4CAF50; color: white; }"
+    ".off { background: #f44336; color: white; }"
     "body { font-family: sans-serif; text-align: center; padding: 10px; margin: 0; background: #f9f9f9; }"
     ".barra { width: 250px; height: 340px; background: #ddd; border-radius: 6px 6px 6px 6px; overflow: hidden; margin: 25px auto 25px auto; display: flex; flex-direction: column-reverse; }"
     ".preenchimento { height: 100%; transition: width 0.3s ease; background: #2196F3; }"
@@ -68,8 +71,10 @@ const char HTML_BODY[] =
     "input { margin-right: 10px; }"
     "</style>"
     "<script>"
+    "function sendCommand(cmd) { fetch('/consumo/' + cmd); }"
     "function atualizar() {"
     "   fetch('/estado').then(res => res.json()).then(data => {"
+    "    document.getElementById('state').innerText = data.led ? 'Ligado' : 'Desligado';"
     "     let x = Number(data.x);"
     "     let min = Number(data.min);"
     "     let max = Number(data.max);"
@@ -125,6 +130,12 @@ const char HTML_BODY[] =
     "<label for='limiteMin'>Limite MÍNIMO(%):</label>"
     "<input type='number' id='limiteMin' name='limiteMin' value='20' min='0' max='100'>"
     "<button type='submit'>Atualizar Limite MÍNIMO</button></form>"
+
+    "<hr style='margin-top: 20px;'>"
+
+    "<p class='label'>Status do Consumo (Bomba 2): <span id='state'>--</span></p>"
+    "<button class='botao on' onclick=\"sendCommand('on')\">Ligar</button>"
+    "<button class='botao off' onclick=\"sendCommand('off')\">Desligar</button>"
 
     "<hr style='margin-top: 20px;'>"
     "<p style='font-size: 15px; color: #336699; font-style: italic; max-width: 90%; margin: 10px auto;'>"
@@ -184,13 +195,43 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
 
     hs->sent = 0;
 
-    if (strncmp(req, "GET /estado", strlen("GET /estado")) == 0) // <--- Corrigido aqui
+    if (strncmp(req, "GET /consumo/on", strlen("GET /consumo/on")) == 0)
+    {
+        // LIGAR a bomba de esvaziar
+        gpio_put(BOMBA_ESVAZIAR_PIN, 0); // Assumindo que 0 LIGA (low-active)
+        g_bomba_esvaziar_ligada = true;  // Atualiza o estado global
+        const char *txt = "Ligado";
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                           "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: text/plain\r\n"
+                           "Content-Length: %d\r\n"
+                           "Connection: close\r\n"
+                           "\r\n"
+                           "%s",
+                           (int)strlen(txt), txt);
+    }
+    else if (strncmp(req, "GET /consumo/off", strlen("GET /consumo/off")) == 0)
+    {
+        // DESLIGAR a bomba de esvaziar
+        gpio_put(BOMBA_ESVAZIAR_PIN, 1); // Assumindo que 1 DESLIGA (low-active)
+        g_bomba_esvaziar_ligada = false; // Atualiza o estado global
+        const char *txt = "Desligado";
+        hs->len = snprintf(hs->response, sizeof(hs->response),
+                           "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: text/plain\r\n"
+                           "Content-Length: %d\r\n"
+                           "Connection: close\r\n"
+                           "\r\n"
+                           "%s",
+                           (int)strlen(txt), txt);
+    }
+    else if (strncmp(req, "GET /estado", strlen("GET /estado")) == 0) // <--- Corrigido aqui
     {
 
         char json_payload[128];
         int json_len = snprintf(json_payload, sizeof(json_payload),
-                                "{\"x\":%.2f,\"min\":%d,\"max\":%d,\"limite\":%d}\r\n",
-                                nivel_percentual_compat, g_nivel_min_pc, g_nivel_max_pc, g_bomba_encher_ligada);
+                                "{\"led\":%d,\"x\":%.0f,\"min\":%d,\"max\":%d,\"limite\":%d, \"bomba2_ligada\":%d}\r\n",                             // Adicione "bomba2_ligada"
+                                g_bomba_esvaziar_ligada, nivel_percentual_compat, g_nivel_min_pc, g_nivel_max_pc, g_bomba_encher_ligada); // Passe o estado da bomba de esvaziar
 
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
@@ -201,6 +242,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            "%s",
                            json_len, json_payload);
     }
+
     else if (strncmp(req, "GET /configmax", strlen("GET /configmax")) == 0) // <--- Corrigido aqui
     {
         printf("Requisição teste GET /config\n");
